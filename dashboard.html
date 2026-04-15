@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UrbanGaz · Smart LPG Control</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Leaflet Map & Routing Machine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            orange: '#F15A24',
+                            navbg: '#F9F9F9',
+                            cardbg: '#FFFFFF',
+                            greenLight: '#D5EBD7',
+                            orangeLight: '#FADAD1',
+                            yellowLight: '#FFF3CD',
+                            bgGray: '#F3F4F6',
+                            // Project Card Colors
+                            cardFilled: '#E2EFE1',
+                            cardReserve: '#FDF1D8',
+                            cardCritical: '#FBDCD3',
+                            pillFilled: '#B1D8B4',
+                            pillReserve: '#FCE182',
+                            pillCritical: '#F6AB8F'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #F8F9FA;
+            color: #333333;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .nav-item-active {
+            background-color: #D5EBD7; /* Light Green */
+            color: #1f2937;
+        }
+        
+        .nav-item-inactive {
+            background-color: #FADAD1; /* Light Orange */
+            color: #1f2937;
+        }
+
+        .stat-card {
+            background: #FFFFFF;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            padding: 16px 20px;
+        }
+
+        .manifold-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 3px solid;
+        }
+        
+        .manifold-circle-active { border-color: #22C55E; }
+        .manifold-circle-reserve { border-color: #EAB308; }
+
+        .chart-container {
+            position: relative;
+            height: 350px;
+            width: 100%;
+        }
+
+        .spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        /* View Transitions */
+        .view-section { display: none; opacity: 0; transition: opacity 0.3s ease; }
+        .view-section.active { display: flex; opacity: 1; }
+
+        /* MacOS Glassy Elements */
+        .mac-glass {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .mac-glass:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.85);
+            box-shadow: 0 6px 12px -2px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        }
+        .mac-glass:focus, .mac-glass:focus-within {
+            outline: none;
+            background: rgba(255, 255, 255, 0.95);
+            border-color: rgba(241, 90, 36, 0.5); /* Brand orange hint */
+            box-shadow: 0 0 0 4px rgba(241, 90, 36, 0.15), inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        /* Interactive Motions */
+        .btn-press {
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: center center;
+            will-change: transform;
+        }
+        .btn-press:active:not(:disabled) {
+            transform: scale(0.96);
+        }
+        
+        .interactive-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .interactive-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        }
+        .interactive-card:active {
+            transform: translateY(-1px) scale(0.99);
+        }
+
+        /* Custom MacOS Dropdown Menus */
+        .mac-menu {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            border-radius: 12px;
+            padding: 6px;
+            transform-origin: top;
+            animation: dropdownFade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        
+        @keyframes dropdownFade {
+            from { opacity: 0; transform: scaleY(0.95) translateY(-5px); }
+            to { opacity: 1; transform: scaleY(1) translateY(0); }
+        }
+
+        .mac-menu-item {
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #334155;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+        
+        .mac-menu-item:hover {
+            background: rgba(241, 90, 36, 0.1);
+            color: #F15A24;
+        }
+
+        /* Modal Animations */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+        .shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+        
+        .modal-enter { opacity: 1 !important; }
+        .modal-enter .mac-glass { transform: scale(1) !important; }
+
+        /* Map Customization */
+        .leaflet-container { background: #e2e8f0; z-index: 10; border-radius: 0.75rem; }
+        .popup-content { font-family: 'Inter', sans-serif; font-size: 12px; }
+        .leaflet-routing-container { display: none !important; }
+        
+        .dot-marker { background: #ED1C24; border: 2px solid white; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .history-marker { background: #3b82f6; border: 2px solid white; width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3); }
+        .live-marker { background: #22c55e; border: 2px solid white; width: 16px; height: 16px; border-radius: 50%; animation: pulse-green 2s infinite; }
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
+    </style>
+</head>
+<body class="h-screen flex flex-col font-sans overflow-hidden antialiased">
+
+    <!-- Top Navigation -->
+    <header class="bg-white h-16 border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-10 relative">
+        <div class="flex items-center gap-3 cursor-pointer btn-press" onclick="navigate('list')">
+            <!-- UGL Logo -->
+            <img src="https://drive.google.com/uc?export=view&id=1waSF0fk2cb0TN0hWIvWyrJy-c_34Eqgd" alt="UrbanGaz Logo" class="h-10 object-contain" onerror="this.outerHTML='<h1 class=\'text-xl font-bold text-brand-orange\'>URBAN GAZ</h1>'">
+        </div>
+
+        <div class="flex items-center gap-8">
+            <nav class="flex gap-6 text-sm font-medium">
+                <a href="#" class="text-slate-800 border-b-2 border-brand-orange pb-1 btn-press" onclick="navigate('list')">Home</a>
+                <a href="#" class="text-slate-500 hover:text-slate-800 pb-1 btn-press" onclick="alert('Settings preferences coming soon!')">Settings</a>
+            </nav>
+            
+            <!-- Top Right Company Logo (Static) -->
+            <div class="flex items-center">
+                <img src="https://jamunagas.com/wp-content/uploads/2025/02/cropped-cropped-Jamuna-Gas-Logo2.png" alt="Jamuna Gas" class="h-8 object-contain">
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- Left Sidebar -->
+        <aside class="w-64 bg-brand-navbg border-r border-slate-200 flex flex-col p-5 shrink-0 z-0 overflow-y-auto">
+            <div class="mb-6">
+                <label class="text-sm font-bold text-slate-800 mb-2 block relative inline-block ml-1">
+                    Select CEC
+                    <div class="absolute -bottom-1 left-0 w-full h-[2px] bg-brand-orange"></div>
+                </label>
+                
+                <!-- GLASSY CUSTOM DROPDOWN: CEC -->
+                <div class="relative mt-4">
+                    <button onclick="toggleDropdown('cec-menu')" class="w-full text-slate-700 text-sm rounded-xl px-4 py-2.5 cursor-pointer font-medium mac-glass flex justify-between items-center text-left btn-press">
+                        <span id="cec-text">CEC - Uttara</span>
+                        <i data-lucide="chevron-down" class="w-4 h-4 text-slate-500"></i>
+                    </button>
+                    <!-- Dropdown Panel -->
+                    <div id="cec-menu" class="hidden absolute top-full left-0 w-full mt-2 mac-menu z-50">
+                        <div class="mac-menu-item" onclick="selectCec('CEC - Uttara')">CEC - Uttara</div>
+                        <div class="mac-menu-item" onclick="selectCec('CEC - Dhanmondi')">CEC - Dhanmondi</div>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="flex flex-col gap-3">
+                <a href="#" id="nav-project-status" class="nav-item-active rounded-xl px-4 py-3 text-sm font-semibold shadow-sm border border-green-200 transition-colors btn-press" onclick="navigate('list')">
+                    Project Status
+                </a>
+                <a href="#" id="nav-distribution" class="nav-item-inactive rounded-xl px-4 py-3 text-sm font-semibold shadow-sm border border-orange-100 opacity-80 hover:opacity-100 transition-opacity btn-press" onclick="navigate('map')">
+                    Distribution Tracker
+                </a>
+                <a href="#" id="nav-inventory" class="nav-item-inactive rounded-xl px-4 py-3 text-sm font-semibold shadow-sm border border-orange-100 opacity-80 hover:opacity-100 transition-opacity btn-press" onclick="navigate('inventory')">
+                    Inventory Status
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 bg-brand-bgGray p-6 overflow-y-auto flex flex-col gap-6 relative">
+            
+            <!-- Top Stats Row (Persistent across views except Map for full height) -->
+            <div id="stats-row" class="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0 transition-all duration-300">
+                <div class="stat-card border border-slate-200/60">
+                    <div class="text-2xl font-bold text-slate-800 mb-1">1634</div>
+                    <div class="flex items-center gap-2 text-sm text-slate-500 bg-slate-100 px-2 py-1 rounded-md inline-flex">
+                        <i data-lucide="building-2" class="w-4 h-4 text-brand-orange"></i> Total Projects
+                    </div>
+                </div>
+                <div class="stat-card border border-slate-200/60">
+                    <div class="text-2xl font-bold text-slate-800 mb-1">08</div>
+                    <div class="flex items-center gap-2 text-sm text-slate-500 bg-slate-100 px-2 py-1 rounded-md inline-flex">
+                        <i data-lucide="flame" class="w-4 h-4 text-yellow-500"></i> In Reserve States
+                    </div>
+                </div>
+                <div class="stat-card border border-slate-200/60">
+                    <div class="text-2xl font-bold text-slate-800 mb-1">05</div>
+                    <div class="flex items-center gap-2 text-sm text-slate-500 bg-slate-100 px-2 py-1 rounded-md inline-flex">
+                        <i data-lucide="flame" class="w-4 h-4 text-red-500"></i> In Critical States
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 1: PROJECT LIST -->
+            <div id="view-list" class="view-section active flex-col gap-5">
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                    
+                    <!-- Card 1: Kacchi vai -->
+                    <div class="bg-brand-cardFilled border border-brand-pillFilled/50 rounded-2xl p-5 flex justify-between cursor-pointer interactive-card group" onclick="navigate('detail', 'Kacchi vai')">
+                        <div>
+                            <h3 class="font-bold text-lg text-slate-800 group-hover:text-brand-orange transition-colors">Kacchi vai</h3>
+                            <p class="text-xs text-slate-600 mt-1 flex items-start gap-1">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400"></i> 17 Khilgaon, Dhaka 1219
+                            </p>
+                            <div class="flex items-center gap-2 mt-3 text-xs font-medium text-slate-700">
+                                <i data-lucide="truck" class="w-3.5 h-3.5 text-slate-400"></i> RDC: Dhanmondi • Status:
+                                <span class="bg-brand-pillReserve text-yellow-900 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">RESERVE</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col justify-center gap-3 border-l border-brand-pillFilled/50 pl-5 ml-2 shrink-0">
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 1 <br><span class="inline-block mt-0.5 bg-[#A4D4A8] text-green-900 px-1.5 py-0.5 rounded text-xs font-mono">P1: 4.3</span></div>
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 2 <br><span class="inline-block mt-0.5 bg-[#F6A488] text-red-900 px-1.5 py-0.5 rounded text-xs font-mono">P2: 3.5</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Rahim Nibash -->
+                    <div class="bg-brand-cardReserve border border-brand-pillReserve/50 rounded-2xl p-5 flex justify-between cursor-pointer interactive-card group" onclick="navigate('detail', 'Rahim Nibash')">
+                        <div>
+                            <h3 class="font-bold text-lg text-slate-800 group-hover:text-brand-orange transition-colors">Rahim Nibash</h3>
+                            <p class="text-xs text-slate-600 mt-1 flex items-start gap-1">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400"></i> 7 Road No. 1, Sector 10, Uttara, Dhaka 1230, Bangladesh
+                            </p>
+                            <div class="flex items-center gap-2 mt-3 text-xs font-medium text-slate-700">
+                                <i data-lucide="truck" class="w-3.5 h-3.5 text-slate-400"></i> RDC: Dhanmondi • Status:
+                                <span class="bg-brand-pillReserve text-yellow-900 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">RESERVE</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col justify-center gap-3 border-l border-brand-pillReserve/50 pl-5 ml-2 shrink-0">
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 1 <br><span class="inline-block mt-0.5 bg-[#A4D4A8] text-green-900 px-1.5 py-0.5 rounded text-xs font-mono">P1: 4.3</span></div>
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 2 <br><span class="inline-block mt-0.5 bg-[#F6A488] text-red-900 px-1.5 py-0.5 rounded text-xs font-mono">P2: 3.5</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Card 3: MGC -->
+                    <div class="bg-brand-cardCritical border border-brand-pillCritical/50 rounded-2xl p-5 flex justify-between cursor-pointer interactive-card group" onclick="navigate('detail', 'MGC - Muzaffar Garden City')">
+                        <div>
+                            <h3 class="font-bold text-lg text-slate-800 group-hover:text-brand-orange transition-colors">MGC - Muzaffar Garden City</h3>
+                            <p class="text-xs text-slate-600 mt-1 flex items-start gap-1">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400"></i> 7 Road No. 1, Sector 10, Uttara, Dhaka 1230, Bangladesh
+                            </p>
+                            <div class="flex items-center gap-2 mt-3 text-xs font-medium text-slate-700">
+                                <i data-lucide="truck" class="w-3.5 h-3.5 text-slate-400"></i> RDC: Dhanmondi • Status:
+                                <span class="bg-brand-pillCritical text-red-900 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">CRITICAL</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col justify-center gap-3 border-l border-brand-pillCritical/50 pl-5 ml-2 shrink-0">
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 1 <br><span class="inline-block mt-0.5 bg-[#A4D4A8] text-green-900 px-1.5 py-0.5 rounded text-xs font-mono">P1: 4.3</span></div>
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 2 <br><span class="inline-block mt-0.5 bg-[#F6A488] text-red-900 px-1.5 py-0.5 rounded text-xs font-mono">P2: 3.5</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Card 4: Shahin Nibash -->
+                    <div class="bg-brand-cardFilled border border-brand-pillFilled/50 rounded-2xl p-5 flex justify-between cursor-pointer interactive-card group" onclick="navigate('detail', 'Shahin Nibash')">
+                        <div>
+                            <h3 class="font-bold text-lg text-slate-800 group-hover:text-brand-orange transition-colors">Shahin Nibash</h3>
+                            <p class="text-xs text-slate-600 mt-1 flex items-start gap-1">
+                                <i data-lucide="map-pin" class="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400"></i> 7 Road No. 1, Sector 10, Uttara, Dhaka 1230, Bangladesh
+                            </p>
+                            <div class="flex items-center gap-2 mt-3 text-xs font-medium text-slate-700">
+                                <i data-lucide="truck" class="w-3.5 h-3.5 text-slate-400"></i> RDC: Dhanmondi • Status:
+                                <span class="bg-brand-pillFilled text-green-900 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide">FILLED</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col justify-center gap-3 border-l border-brand-pillFilled/50 pl-5 ml-2 shrink-0">
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 1 <br><span class="inline-block mt-0.5 bg-[#A4D4A8] text-green-900 px-1.5 py-0.5 rounded text-xs font-mono">P1: 4.3</span></div>
+                            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Manifold 2 <br><span class="inline-block mt-0.5 bg-[#F6A488] text-red-900 px-1.5 py-0.5 rounded text-xs font-mono">P2: 3.5</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: PROJECT DETAIL (Charts & Controls) -->
+            <div id="view-detail" class="view-section flex-col gap-6">
+                
+                <!-- Back Button -->
+                <div class="flex items-center gap-2">
+                    <button onclick="navigate('list')" class="flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-brand-orange bg-white border border-slate-200 px-4 py-2 rounded-xl shadow-sm btn-press hover:-translate-x-1">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Back to Projects
+                    </button>
+                </div>
+
+                <div class="flex flex-col xl:flex-row gap-6">
+                    <!-- Left/Main Column (Header + Chart) -->
+                    <div class="flex-1 flex flex-col gap-6">
+                        
+                        <!-- Project Status Header -->
+                        <div class="bg-white rounded-xl border border-slate-200 p-6 flex flex-wrap md:flex-nowrap justify-between items-center shadow-sm">
+                            <div class="space-y-2">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="building" class="w-5 h-5 text-brand-orange"></i>
+                                    <h2 id="detail-title" class="text-lg font-bold text-slate-800">MGC - Muzaffar Garden City</h2>
+                                </div>
+                                <div class="flex items-start gap-2 text-sm text-slate-500 ml-7">
+                                    <i data-lucide="map-pin" class="w-4 h-4 mt-0.5 shrink-0"></i>
+                                    <p>7 Road No. 1, Sector 10, Uttara, Dhaka 1230,<br>Bangladesh</p>
+                                </div>
+                                <div class="flex items-center gap-2 ml-7 mt-2">
+                                    <span class="text-sm font-medium text-slate-600">Status:</span>
+                                    <span class="bg-green-100 text-green-700 px-3 py-0.5 rounded-full text-xs font-bold tracking-wide">FILLED</span>
+                                </div>
+                            </div>
+
+                            <!-- Manifold Indicators -->
+                            <div class="flex flex-col items-center mt-4 md:mt-0">
+                                <span class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2">MANIFOLD</span>
+                                <div class="flex items-center gap-4">
+                                    <div id="ui-manifold-1-indicator" class="manifold-circle manifold-circle-active bg-white">
+                                        <div class="text-3xl font-bold leading-none text-slate-800">1</div>
+                                        <div class="text-[10px] font-bold text-slate-500 uppercase mt-1">Active</div>
+                                    </div>
+                                    <div id="ui-manifold-2-indicator" class="manifold-circle manifold-circle-reserve bg-white">
+                                        <div class="text-3xl font-bold leading-none text-slate-800">2</div>
+                                        <div class="text-[10px] font-bold text-slate-500 uppercase mt-1">Reserve</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SENSOR DATA GRID -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <!-- Temp -->
+                            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 interactive-card">
+                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Temperature</div>
+                                <div class="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center shrink-0">
+                                    <i data-lucide="thermometer" class="w-5 h-5"></i>
+                                </div>
+                                <div class="text-lg font-bold font-mono text-slate-800">32<span class="text-xs text-slate-500 font-sans ml-0.5">°C</span></div>
+                            </div>
+                            <!-- Humidity -->
+                            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 interactive-card">
+                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Humidity</div>
+                                <div class="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
+                                    <i data-lucide="droplets" class="w-5 h-5"></i>
+                                </div>
+                                <div class="text-lg font-bold font-mono text-slate-800">42.2<span class="text-xs text-slate-500 font-sans ml-0.5">%</span></div>
+                            </div>
+                            <!-- Voltage -->
+                            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 interactive-card">
+                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Input Voltage</div>
+                                <div class="w-10 h-10 rounded-full bg-green-50 text-green-500 flex items-center justify-center shrink-0">
+                                    <i data-lucide="zap" class="w-5 h-5"></i>
+                                </div>
+                                <div class="text-lg font-bold font-mono text-slate-800">10.91<span class="text-xs text-slate-500 font-sans ml-0.5">V</span></div>
+                            </div>
+                            <!-- Leakage -->
+                            <div class="bg-white rounded-xl border border-green-200 bg-green-50/50 p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 interactive-card">
+                                <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Gas Leakage</div>
+                                <div class="w-10 h-10 rounded-full bg-green-100 text-green-600 flex items-center justify-center shrink-0">
+                                    <i data-lucide="shield-check" class="w-5 h-5"></i>
+                                </div>
+                                <div class="text-[15px] font-bold text-green-700 font-mono">✔ NORMAL</div>
+                            </div>
+                        </div>
+
+                        <!-- Pressure Chart Card -->
+                        <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm flex flex-col flex-1">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="font-bold text-slate-800 text-lg">Manifold Pressure Details (Bar)</h3>
+                                <div class="flex items-center gap-3">
+                                    <div class="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-md text-sm font-medium text-slate-600">
+                                        Today <i data-lucide="calendar" class="w-4 h-4 text-slate-400"></i>
+                                    </div>
+                                    <div class="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-md text-sm font-medium text-slate-600 font-mono">
+                                        10.00 - 22.00 <i data-lucide="clock" class="w-4 h-4 text-slate-400"></i>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="pressureChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Sidebar Column (Switchover Control & History) -->
+                    <div class="w-full xl:w-80 flex flex-col gap-6 shrink-0">
+                        
+                        <!-- Active Manifold Status Card (Actionable) -->
+                        <div id="active-manifold-card" class="bg-brand-greenLight rounded-xl p-5 border border-green-200 shadow-sm relative overflow-hidden transition-colors duration-300">
+                            <div class="flex items-center gap-2 mb-4">
+                                <i data-lucide="flame" class="w-6 h-6 text-green-700"></i>
+                                <h3 id="panel-manifold-title" class="font-bold text-slate-800 text-lg">Manifold 1</h3>
+                            </div>
+                            
+                            <div class="bg-green-400/20 rounded-lg p-3 inline-block mb-6 border border-green-500/20">
+                                <div class="text-3xl font-bold text-slate-800 font-mono" id="panel-pressure-val">P1: 4.3</div>
+                            </div>
+
+                            <div class="space-y-4 mb-6">
+                                <div class="flex gap-3">
+                                    <i data-lucide="briefcase" class="w-5 h-5 text-slate-600 shrink-0"></i>
+                                    <div>
+                                        <div class="text-xs font-bold text-slate-500 uppercase">Operator:</div>
+                                        <div class="text-sm font-medium text-slate-800">Jamuna Gas</div>
+                                    </div>
+                                </div>
+                                <div class="border-t border-green-200/50 pt-4">
+                                    <div class="text-xs font-medium text-slate-500 mb-1">Last Refill Time & Date:</div>
+                                    <div class="text-sm font-medium text-slate-800 font-mono">01 Apr, 2026 | 03:40 PM</div>
+                                </div>
+                            </div>
+
+                            <!-- Manual Override Button -->
+                            <button id="btn-manual-switch" onclick="initiateSwitch()" class="w-full text-slate-800 font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 mac-glass btn-press hover:text-brand-orange mt-2">
+                                <i data-lucide="arrow-right-left" class="w-4 h-4"></i> Switch to Manifold 2
+                            </button>
+                        </div>
+
+                        <!-- Recent Switchover Log -->
+                        <div class="bg-brand-orangeLight/30 rounded-xl p-5 border border-orange-100 flex-1 flex flex-col shadow-sm">
+                            <h3 class="font-bold text-slate-800 mb-4">Recent Switchover</h3>
+                            <div class="space-y-4 overflow-y-auto pr-2" id="switch-history" style="max-height: 350px;">
+                                <!-- Static Log Items -->
+                                <div class="flex gap-3 relative">
+                                    <div class="w-6 h-6 rounded-full bg-brand-orange text-white flex items-center justify-center shrink-0 z-10 relative">
+                                        <i data-lucide="arrow-right-left" class="w-3 h-3"></i>
+                                    </div>
+                                    <div class="pb-4 border-l border-slate-200 absolute left-3 top-6 h-full z-0"></div>
+                                    <div>
+                                        <div class="text-sm font-bold text-slate-800">Manifold 2</div>
+                                        <div class="text-xs text-slate-500 font-mono mt-0.5">01 Apr, 2026<br>03:40 PM</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 relative">
+                                    <div class="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center shrink-0 z-10 relative">
+                                        <i data-lucide="arrow-right-left" class="w-3 h-3"></i>
+                                    </div>
+                                    <div class="pb-4 border-l border-slate-200 absolute left-3 top-6 h-full z-0"></div>
+                                    <div>
+                                        <div class="text-sm font-bold text-slate-800">Manifold 1</div>
+                                        <div class="text-xs text-slate-500 font-mono mt-0.5">14 Mar, 2026<br>02:00 AM</div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-3 relative">
+                                    <div class="w-6 h-6 rounded-full bg-brand-orange text-white flex items-center justify-center shrink-0 z-10 relative">
+                                        <i data-lucide="arrow-right-left" class="w-3 h-3"></i>
+                                    </div>
+                                    <div>
+                                        <div class="text-sm font-bold text-slate-800">Manifold 2</div>
+                                        <div class="text-xs text-slate-500 font-mono mt-0.5">01 Feb, 2026<br>11:15 AM</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 3: MAP / DISTRIBUTION TRACKER -->
+            <div id="view-map" class="view-section flex-col gap-4 h-full min-h-[600px] bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex-1">
+                
+                <!-- MAP CONTROL TOOLBAR -->
+                <div class="bg-white px-6 py-4 flex flex-wrap gap-4 items-center z-20 shadow-sm">
+                    <div class="flex items-center gap-3 border-r border-slate-200 pr-4 mr-2">
+                        <div class="w-8 h-8 bg-brand-orange rounded-lg flex items-center justify-center text-white">
+                            <i data-lucide="map" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <h1 class="font-bold text-slate-800 text-lg leading-none">Live Network</h1>
+                            <div class="flex items-center gap-2 mt-1 text-[10px] text-slate-500 font-medium uppercase tracking-widest">
+                                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> ONLINE
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GLASSY CUSTOM DROPDOWN: Area Selector -->
+                    <div class="relative group min-w-[160px]">
+                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Filter by Area</label>
+                        <div class="relative">
+                            <button onclick="toggleDropdown('area-menu')" class="w-full text-slate-700 text-sm py-2.5 pl-9 pr-4 cursor-pointer rounded-xl mac-glass font-medium flex justify-between items-center text-left btn-press">
+                                <i data-lucide="map-pin" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                                <span id="area-text" class="truncate">All Zones</span>
+                                <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400 shrink-0"></i>
+                            </button>
+                            <!-- Dropdown Panel -->
+                            <div id="area-menu" class="hidden absolute top-full left-0 w-full mt-2 mac-menu z-50 max-h-60 overflow-y-auto">
+                                <div class="mac-menu-item" onclick="selectArea('all', 'All Zones')">All Zones</div>
+                            </div>
+                            <input type="hidden" id="mapAreaFilter" value="all">
+                        </div>
+                    </div>
+
+                    <div class="h-8 w-px bg-slate-200 hidden md:block"></div>
+
+                    <!-- GLASSY CUSTOM DROPDOWN: Cylinder Selector -->
+                    <div class="relative group flex-1 min-w-[200px]">
+                        <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Track Specific Cylinder</label>
+                        <div class="relative">
+                            <button onclick="toggleDropdown('cylinder-menu')" class="w-full text-slate-700 text-sm py-2.5 pl-9 pr-4 cursor-pointer rounded-xl mac-glass font-medium flex justify-between items-center text-left btn-press">
+                                <i data-lucide="search" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                                <span id="cylinder-text" class="truncate">Select ID...</span>
+                                <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400 shrink-0"></i>
+                            </button>
+                            <!-- Dropdown Panel -->
+                            <div id="cylinder-menu" class="hidden absolute top-full left-0 w-full mt-2 mac-menu z-50 max-h-60 overflow-y-auto">
+                                <div class="mac-menu-item" onclick="selectCylinder('', 'Select ID...')">Select ID...</div>
+                            </div>
+                            <input type="hidden" id="cylinderFilter" value="">
+                        </div>
+                    </div>
+
+                    <div class="h-8 w-px bg-slate-200 hidden md:block"></div>
+
+                    <!-- Date Range -->
+                    <div class="flex items-center gap-3">
+                        <div class="relative group">
+                             <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">From Date</label>
+                             <input type="date" id="dateFrom" onchange="refreshMapState()" class="text-slate-700 text-xs py-2 px-3 cursor-pointer rounded-xl mac-glass font-medium">
+                        </div>
+                        <div class="relative group">
+                             <label class="block text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">To Date</label>
+                             <input type="date" id="dateTo" onchange="refreshMapState()" class="text-slate-700 text-xs py-2 px-3 cursor-pointer rounded-xl mac-glass font-medium">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MAP CANVAS -->
+                <div id="leafletMap" class="flex-1 w-full h-full relative z-0"></div>
+
+            </div>
+
+            <!-- VIEW 4: INVENTORY STATUS -->
+            <div id="view-inventory" class="view-section flex-col gap-6 items-center justify-center h-full min-h-[500px] bg-white rounded-xl border border-slate-200 shadow-sm flex-1">
+                <div class="w-20 h-20 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mb-2">
+                    <i data-lucide="package-search" class="w-10 h-10"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-slate-800">Inventory Module</h2>
+                <p class="text-slate-500 max-w-sm text-center">The real-time inventory tracking and cylinder assignment module is currently offline for maintenance.</p>
+                <button onclick="navigate('list')" class="mt-4 bg-brand-orange text-white px-6 py-2.5 rounded-xl font-bold btn-press shadow-sm hover:bg-orange-600 transition-colors">Return to Dashboard</button>
+            </div>
+            
+        </main>
+    </div>
+
+    <!-- PIN AUTHORIZATION MODAL -->
+    <div id="pin-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden opacity-0 transition-opacity duration-300">
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onclick="closePinModal()"></div>
+        <div class="mac-glass bg-white/90 w-full max-w-sm rounded-3xl p-8 relative z-10 transform scale-95 transition-transform duration-300 flex flex-col items-center text-center">
+            <div class="w-14 h-14 rounded-full bg-brand-orangeLight/50 text-brand-orange flex items-center justify-center mb-5">
+                <i data-lucide="shield-alert" class="w-7 h-7"></i>
+            </div>
+            <h3 class="font-bold text-xl text-slate-800">Authorization Required</h3>
+            <p class="text-sm text-slate-500 mt-2 mb-6">Enter engineer PIN to override the automated manifold controls.</p>
+
+            <input type="password" id="pin-input" maxlength="4" inputmode="numeric" placeholder="••••" class="w-36 text-center text-3xl tracking-[0.4em] font-mono bg-white border-2 border-slate-200 rounded-xl py-3 focus:border-brand-orange focus:ring-4 focus:ring-brand-orange/20 outline-none transition-all mb-1 text-slate-800 placeholder:text-slate-300" onkeyup="if(event.key === 'Enter') submitPin()">
+            <p id="pin-error" class="text-xs text-red-500 font-bold h-4 mb-5 opacity-0 transition-opacity">Invalid PIN. Try again.</p>
+
+            <div class="flex gap-3 w-full">
+                <button onclick="closePinModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-colors btn-press">Cancel</button>
+                <button onclick="submitPin()" class="flex-1 bg-brand-orange hover:bg-orange-600 text-white font-bold py-3 rounded-xl shadow-sm transition-colors btn-press">Verify PIN</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        // ----------------------------------------------------
+        // Navigation / Routing Logic
+        // ----------------------------------------------------
+        function navigate(viewName, projectTitle = null) {
+            const viewList = document.getElementById('view-list');
+            const viewDetail = document.getElementById('view-detail');
+            const viewMap = document.getElementById('view-map');
+            const viewInventory = document.getElementById('view-inventory');
+            const navProj = document.getElementById('nav-project-status');
+            const navDist = document.getElementById('nav-distribution');
+            const navInv = document.getElementById('nav-inventory');
+            const statsRow = document.getElementById('stats-row');
+
+            // Hide all views first
+            viewList.classList.remove('active');
+            viewDetail.classList.remove('active');
+            viewMap.classList.remove('active');
+            viewInventory.classList.remove('active');
+            
+            // Reset Nav Styles
+            navProj.classList.replace('nav-item-active', 'nav-item-inactive');
+            navDist.classList.replace('nav-item-active', 'nav-item-inactive');
+            navInv.classList.replace('nav-item-active', 'nav-item-inactive');
+
+            if (viewName === 'list') {
+                statsRow.style.display = 'grid';
+                setTimeout(() => viewList.classList.add('active'), 10);
+                navProj.classList.replace('nav-item-inactive', 'nav-item-active');
+            } 
+            else if (viewName === 'detail') {
+                statsRow.style.display = 'grid';
+                if (projectTitle) {
+                    document.getElementById('detail-title').textContent = projectTitle;
+                }
+                setTimeout(() => viewDetail.classList.add('active'), 10);
+                
+                // Re-render chart to ensure size fits newly visible container
+                if (pressureChart) {
+                    setTimeout(() => pressureChart.resize(), 50);
+                }
+            }
+            else if (viewName === 'map') {
+                statsRow.style.display = 'none'; // Hide stats to give map full height
+                setTimeout(() => {
+                    viewMap.classList.add('active');
+                    if(map) { map.invalidateSize(); } // Fix gray tiles issue on hidden map
+                }, 10);
+                navDist.classList.replace('nav-item-inactive', 'nav-item-active');
+            }
+            else if (viewName === 'inventory') {
+                statsRow.style.display = 'none'; // Hide stats
+                setTimeout(() => viewInventory.classList.add('active'), 10);
+                navInv.classList.replace('nav-item-inactive', 'nav-item-active');
+            }
+        }
+
+        // ----------------------------------------------------
+        // Custom Dropdown UI Logic
+        // ----------------------------------------------------
+        function toggleDropdown(menuId) {
+            // Close all other menus first
+            document.querySelectorAll('.mac-menu').forEach(menu => {
+                if(menu.id !== menuId) menu.classList.add('hidden');
+            });
+            const menu = document.getElementById(menuId);
+            menu.classList.toggle('hidden');
+        }
+
+        // Close dropdowns if clicking outside
+        document.addEventListener('click', (e) => {
+            if(!e.target.closest('.relative')) {
+                document.querySelectorAll('.mac-menu').forEach(menu => menu.classList.add('hidden'));
+            }
+        });
+
+        // Setup Selection Handlers
+        function selectCec(val) {
+            document.getElementById('cec-text').textContent = val;
+            document.getElementById('cec-menu').classList.add('hidden');
+        }
+
+        function selectArea(val, text) {
+            document.getElementById('area-text').textContent = text;
+            document.getElementById('mapAreaFilter').value = val;
+            document.getElementById('area-menu').classList.add('hidden');
+            refreshMapState(); // Trigger map update
+        }
+
+        function selectCylinder(val, text) {
+            document.getElementById('cylinder-text').textContent = text;
+            document.getElementById('cylinderFilter').value = val;
+            document.getElementById('cylinder-menu').classList.add('hidden');
+            refreshMapState(); // Trigger map update
+        }
+
+        // ----------------------------------------------------
+        // Chart.js Configuration
+        // ----------------------------------------------------
+        const ctx = document.getElementById('pressureChart').getContext('2d');
+        
+        // Custom plugin to draw vertical crossover highlight background (like in image)
+        const crossoverHighlightPlugin = {
+            id: 'crossoverHighlight',
+            beforeDraw: (chart) => {
+                if (chart.tooltip && chart.tooltip._active && chart.tooltip._active.length) {
+                    const activePoint = chart.tooltip._active[0];
+                    const ctx = chart.ctx;
+                    const x = activePoint.element.x;
+                    const topY = chart.scales.y.top;
+                    const bottomY = chart.scales.y.bottom;
+                    
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(x, topY);
+                    ctx.lineTo(x, bottomY);
+                    ctx.lineWidth = 40;
+                    ctx.strokeStyle = 'rgba(241, 90, 36, 0.1)'; // Brand orange light
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+        };
+
+        const labels = ['10.00', '11.00', '12.00', '13.00', '14.00', '15.00', '16.00', '17.00', '18.00', '19.00', '20.00', '21.00', '22.00'];
+        
+        // Finalized array points for demonstration crossover
+        const finalDataM1 = [5.2, 5.9, 5.7, 5.9, 5.9, 5.9, 6.0, 4.2, 2.2, 2.9, 2.4, 2.4, 2.5]; 
+        const finalDataM2 = [2.8, 2.8, 2.7, 2.8, 2.8, 2.8, 2.9, 3.8, 5.5, 4.5, 5.2, 5.2, 4.9];
+
+        const pressureChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Manifold 1',
+                        data: finalDataM1,
+                        borderColor: '#22C55E', // Green
+                        backgroundColor: '#22C55E',
+                        borderWidth: 2.5,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Manifold 2',
+                        data: finalDataM2,
+                        borderColor: '#F15A24', // Orange
+                        backgroundColor: '#F15A24',
+                        borderWidth: 2.5,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                        titleColor: '#333',
+                        bodyColor: '#555',
+                        borderColor: '#e2e8f0',
+                        borderWidth: 1,
+                        padding: 10,
+                        boxPadding: 4,
+                        usePointStyle: true,
+                        callbacks: {
+                            label: function(context) {
+                                return ` ${context.dataset.label}: ${context.parsed.y} Bar`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        max: 9,
+                        ticks: { stepSize: 1, color: '#94a3b8', font: { family: "'JetBrains Mono', monospace", size: 10 } },
+                        grid: { borderDash: [4, 4], color: '#f1f5f9', drawBorder: false }
+                    },
+                    x: {
+                        ticks: { color: '#94a3b8', font: { family: "'JetBrains Mono', monospace", size: 10 } },
+                        grid: { display: false, drawBorder: false }
+                    }
+                }
+            },
+            plugins: [crossoverHighlightPlugin]
+        });
+
+        // ----------------------------------------------------
+        // Business Logic: Manifold Switching Simulation
+        // ----------------------------------------------------
+        let activeManifold = 1; // 1 or 2
+        let isSwitching = false;
+        let intendedManifold = null;
+
+        function initiateSwitch() {
+            if (isSwitching) return;
+            
+            intendedManifold = activeManifold === 1 ? 2 : 1;
+            
+            const modal = document.getElementById('pin-modal');
+            const input = document.getElementById('pin-input');
+            const error = document.getElementById('pin-error');
+            
+            // Reset modal state
+            error.classList.remove('opacity-100');
+            input.classList.remove('border-red-500', 'text-red-500');
+            input.value = '';
+            
+            // Show modal with animation
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.add('modal-enter');
+                input.focus();
+            }, 10);
+        }
+
+        function closePinModal() {
+            const modal = document.getElementById('pin-modal');
+            modal.classList.remove('modal-enter');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
+        function submitPin() {
+            const input = document.getElementById('pin-input');
+            const error = document.getElementById('pin-error');
+            
+            if (input.value === '1234') {
+                closePinModal();
+                executeSwitch(intendedManifold);
+            } else {
+                // Invalid PIN animation
+                input.classList.add('shake', 'border-red-500', 'text-red-500');
+                error.classList.add('opacity-100');
+                
+                setTimeout(() => {
+                    input.classList.remove('shake');
+                }, 400);
+            }
+        }
+
+        function executeSwitch(targetManifold) {
+            isSwitching = true;
+            const btn = document.getElementById('btn-manual-switch');
+            
+            // Loading State
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 spinner"></i> Actuating Valve...';
+            btn.disabled = true;
+            btn.classList.add('opacity-70', 'cursor-not-allowed');
+            lucide.createIcons();
+
+            // Simulate mechanical delay (2 seconds)
+            setTimeout(() => {
+                activeManifold = targetManifold;
+                isSwitching = false;
+                updateUIPostSwitch();
+                addHistoryLog();
+            }, 2000);
+        }
+
+        function updateUIPostSwitch() {
+            const btn = document.getElementById('btn-manual-switch');
+            const ind1 = document.getElementById('ui-manifold-1-indicator');
+            const ind2 = document.getElementById('ui-manifold-2-indicator');
+            
+            const card = document.getElementById('active-manifold-card');
+            const panelTitle = document.getElementById('panel-manifold-title');
+            const panelPres = document.getElementById('panel-pressure-val');
+
+            if (activeManifold === 2) {
+                // Update Top Indicators
+                ind1.classList.replace('manifold-circle-active', 'manifold-circle-reserve');
+                ind1.querySelector('.uppercase.mt-1').textContent = 'Reserve';
+                
+                ind2.classList.replace('manifold-circle-reserve', 'manifold-circle-active');
+                ind2.querySelector('.uppercase.mt-1').textContent = 'Active';
+
+                // Update Side Panel (Switch to Orange/Manifold 2 Theme)
+                card.classList.replace('bg-brand-greenLight', 'bg-brand-orangeLight');
+                card.classList.replace('border-green-200', 'border-orange-200');
+                
+                panelTitle.textContent = 'Manifold 2';
+                const iconSvg2 = panelTitle.parentElement.querySelector('svg');
+                if (iconSvg2) iconSvg2.classList.replace('text-green-700', 'text-brand-orange');
+                
+                panelPres.parentElement.classList.replace('bg-green-400/20', 'bg-orange-400/20');
+                panelPres.parentElement.classList.replace('border-green-500/20', 'border-orange-500/20');
+                panelPres.textContent = 'P2: 5.5';
+
+                // Reset Button
+                btn.innerHTML = '<i data-lucide="arrow-right-left" class="w-4 h-4"></i> Switch to Manifold 1';
+            } else {
+                // Revert to Manifold 1
+                ind2.classList.replace('manifold-circle-active', 'manifold-circle-reserve');
+                ind2.querySelector('.uppercase.mt-1').textContent = 'Reserve';
+                
+                ind1.classList.replace('manifold-circle-reserve', 'manifold-circle-active');
+                ind1.querySelector('.uppercase.mt-1').textContent = 'Active';
+
+                // Update Side Panel (Switch to Green/Manifold 1 Theme)
+                card.classList.replace('bg-brand-orangeLight', 'bg-brand-greenLight');
+                card.classList.replace('border-orange-200', 'border-green-200');
+                
+                panelTitle.textContent = 'Manifold 1';
+                const iconSvg1 = panelTitle.parentElement.querySelector('svg');
+                if (iconSvg1) iconSvg1.classList.replace('text-brand-orange', 'text-green-700');
+                
+                panelPres.parentElement.classList.replace('bg-orange-400/20', 'bg-green-400/20');
+                panelPres.parentElement.classList.replace('border-orange-500/20', 'border-green-500/20');
+                panelPres.textContent = 'P1: 4.3';
+
+                // Reset Button
+                btn.innerHTML = '<i data-lucide="arrow-right-left" class="w-4 h-4"></i> Switch to Manifold 2';
+            }
+
+            btn.disabled = false;
+            btn.classList.remove('opacity-70', 'cursor-not-allowed');
+            lucide.createIcons();
+        }
+
+        function addHistoryLog() {
+            const historyContainer = document.getElementById('switch-history');
+            
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+            const isManifold2 = activeManifold === 2;
+            const bgColor = isManifold2 ? 'bg-brand-orange' : 'bg-green-500';
+
+            const logEntryHTML = `
+                <div class="flex gap-3 relative animate-pulse">
+                    <div class="w-6 h-6 rounded-full ${bgColor} text-white flex items-center justify-center shrink-0 z-10 relative">
+                        <i data-lucide="arrow-right-left" class="w-3 h-3"></i>
+                    </div>
+                    <div class="pb-4 border-l border-slate-200 absolute left-3 top-6 h-full z-0"></div>
+                    <div>
+                        <div class="text-sm font-bold text-slate-800">Manifold ${activeManifold}</div>
+                        <div class="text-xs text-slate-500 font-mono mt-0.5">Just now<br>${timeStr}</div>
+                    </div>
+                </div>
+            `;
+
+            // Insert at top
+            historyContainer.insertAdjacentHTML('afterbegin', logEntryHTML);
+            lucide.createIcons();
+            
+            setTimeout(() => {
+                historyContainer.firstElementChild.classList.remove('animate-pulse');
+            }, 1500);
+        }
+
+        // ----------------------------------------------------
+        // Leaflet Map Logic (Distribution Tracker)
+        // ----------------------------------------------------
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQFg_J_J2K7XVcT4MyTSDkiWyZBVpqBjLBqON7UZgDVi0dh1a3zwh4LeG7ioq3Uu4/exec";
+        
+        let map = null;
+        let markersLayer = null;
+        let routingControl = null;
+        let allMapData = []; 
+
+        function initMap() {
+            // Standard Street Map View (Clean)
+            map = L.map('leafletMap', {zoomControl: false}).setView([23.8103, 90.4125], 11);
+            L.control.zoom({position: 'bottomright'}).addTo(map);
+
+            // Light Map Tiles for Professional Look
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 20
+            }).addTo(map);
+
+            markersLayer = L.layerGroup().addTo(map);
+            fetchMapData();
+        }
+
+        async function fetchMapData() {
+            try {
+                const res = await fetch(`${SCRIPT_URL}?action=getMapData`);
+                const data = await res.json();
+                
+                if(data.status === 'success' && data.locations) {
+                    allMapData = data.locations;
+                    populateDropdowns(allMapData);
+                    refreshMapState(); // Default view
+                }
+            } catch(e) {
+                console.error("Map Error", e);
+                // Graceful fallback if Apps Script fails to load
+            }
+        }
+
+        function populateDropdowns(data) {
+            const areas = new Set();
+            const cylinders = new Set();
+
+            data.forEach(loc => {
+                if(loc.area) areas.add(loc.area);
+                if(loc.id) cylinders.add(loc.id);
+            });
+
+            // Populate Areas into Custom Glass Dropdown
+            const areaMenu = document.getElementById('area-menu');
+            areaMenu.innerHTML = `<div class="mac-menu-item" onclick="selectArea('all', 'All Zones')">All Zones</div>`;
+            Array.from(areas).sort().forEach(a => {
+                areaMenu.innerHTML += `<div class="mac-menu-item" onclick="selectArea('${a}', '${a}')">${a}</div>`;
+            });
+
+            // Populate Cylinders into Custom Glass Dropdown
+            const cylMenu = document.getElementById('cylinder-menu');
+            cylMenu.innerHTML = `<div class="mac-menu-item" onclick="selectCylinder('', 'Select ID...')">Select ID...</div>`;
+            Array.from(cylinders).sort().forEach(id => {
+                cylMenu.innerHTML += `<div class="mac-menu-item" onclick="selectCylinder('${id}', '${id}')">${id}</div>`;
+            });
+        }
+
+        function isDateInRange(itemDateStr) {
+            const fromVal = document.getElementById('dateFrom').value;
+            const toVal = document.getElementById('dateTo').value;
+            
+            if (!fromVal && !toVal) return true; // No filter
+            
+            const itemDate = new Date(itemDateStr).setHours(0,0,0,0);
+            
+            if (fromVal) {
+                const fromDate = new Date(fromVal).setHours(0,0,0,0);
+                if (itemDate < fromDate) return false;
+            }
+            
+            if (toVal) {
+                const toDate = new Date(toVal).setHours(0,0,0,0);
+                if (itemDate > toDate) return false;
+            }
+            
+            return true;
+        }
+
+        function refreshMapState() {
+            const cylId = document.getElementById('cylinderFilter').value;
+            const area = document.getElementById('mapAreaFilter').value;
+            
+            if (cylId) {
+                if(area !== 'all') {
+                    // UI Cleanup: Reset area visually if searching cylinder
+                    document.getElementById('mapAreaFilter').value = 'all'; 
+                    document.getElementById('area-text').textContent = 'All Zones';
+                }
+                renderCylinderRoute(cylId);
+            } else {
+                renderAreaPins(area);
+            }
+        }
+
+        function renderAreaPins(area) {
+            clearRouting();
+            markersLayer.clearLayers();
+            
+            const filtered = allMapData.filter(l => {
+                const matchesArea = area === 'all' ? true : l.area === area;
+                return matchesArea && isDateInRange(l.date);
+            });
+            
+            filtered.forEach(loc => {
+                const coords = parseCoords(loc.link);
+                if(coords) {
+                    const icon = L.divIcon({className: 'dot-marker', iconSize: [12, 12]});
+                    L.marker(coords, {icon: icon})
+                     .bindPopup(createPopup(loc))
+                     .addTo(markersLayer);
+                }
+            });
+            
+            if(filtered.length > 0) fitMapToBounds();
+        }
+
+        function renderCylinderRoute(cylId) {
+            clearRouting();
+            markersLayer.clearLayers();
+
+            const cylinderHistory = allMapData.filter(l => {
+                return l.id === cylId && isDateInRange(l.date);
+            });
+            
+            cylinderHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            const waypoints = [];
+            
+            cylinderHistory.forEach((loc, index) => {
+                const coords = parseCoords(loc.link);
+                if(coords) {
+                    const isLast = index === cylinderHistory.length - 1;
+                    
+                    let className = isLast ? 'live-marker' : 'history-marker';
+                    let zIndex = isLast ? 1000 : 100;
+
+                    const icon = L.divIcon({className: className, iconSize: [16, 16]});
+                    
+                    L.marker(coords, {icon: icon, zIndexOffset: zIndex})
+                     .bindPopup(createPopup(loc, isLast ? "Latest Position" : `History Stop #${index + 1}`))
+                     .addTo(markersLayer);
+
+                    waypoints.push(L.latLng(coords[0], coords[1]));
+                }
+            });
+
+            if (waypoints.length > 1) {
+                drawRoute(waypoints);
+            } else if (waypoints.length === 1) {
+                fitMapToBounds(); 
+            }
+        }
+
+        function drawRoute(waypoints) {
+            routingControl = L.Routing.control({
+                waypoints: waypoints,
+                router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+                lineOptions: {
+                    styles: [
+                        {color: 'black', opacity: 0.2, weight: 6}, // Shadow
+                        {color: '#3b82f6', opacity: 0.8, weight: 4, dashArray: '10, 10'} // Blue Path
+                    ]
+                },
+                createMarker: function() { return null; }, 
+                addWaypoints: false,
+                draggableWaypoints: false,
+                fitSelectedRoutes: true, 
+                show: false
+            }).addTo(map);
+        }
+
+        function clearRouting() {
+            if (routingControl) {
+                map.removeControl(routingControl);
+                routingControl = null;
+            }
+        }
+
+        function parseCoords(link) {
+            if(!link || !link.includes('q=')) return null;
+            try {
+                const raw = link.split('q=')[1].split('&')[0];
+                const [lat, lng] = raw.split(',');
+                if(!isNaN(lat) && !isNaN(lng)) return [parseFloat(lat), parseFloat(lng)];
+            } catch(e) {}
+            return null;
+        }
+
+        function createPopup(loc, title = "Cylinder Info") {
+            const dateObj = new Date(loc.date);
+            const date = dateObj.toLocaleDateString();
+            const time = dateObj.toLocaleTimeString();
+            return `
+                <div class="popup-content">
+                    <div style="font-weight:bold; color:#1e293b; margin-bottom:4px; border-bottom:1px solid #e2e8f0;">${title}</div>
+                    <div><b>ID:</b> ${loc.id}</div>
+                    <div><b>Area:</b> ${loc.area}</div>
+                    <div><b>Date:</b> ${date}</div>
+                    <div style="color:#64748b; font-size:10px;">${time}</div>
+                </div>
+            `;
+        }
+
+        function fitMapToBounds() {
+            if(markersLayer.getLayers().length > 0) {
+                const group = new L.featureGroup(markersLayer.getLayers());
+                map.fitBounds(group.getBounds().pad(0.1));
+            } else {
+                map.setView([23.8103, 90.4125], 11);
+            }
+        }
+
+        // Init Map on load
+        window.addEventListener('load', initMap);
+
+    </script>
+</body>
+</html>
