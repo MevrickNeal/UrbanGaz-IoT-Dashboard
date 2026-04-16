@@ -94,6 +94,7 @@
             align-items: center;
             justify-content: center;
             border: 3px solid;
+            transition: all 0.3s ease;
         }
         
         .manifold-circle-active { border-color: #22C55E; }
@@ -214,7 +215,7 @@
     <header class="bg-white h-16 border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-10 relative">
         <div class="flex items-center gap-3 cursor-pointer btn-press" onclick="navigate('list')">
             <!-- UGL Logo -->
-            <img src="https://drive.google.com/uc?export=view&id=1waSF0fk2cb0TN0hWIvWyrJy-c_34Eqgd" alt="UrbanGaz Logo" class="h-10 object-contain" onerror="this.outerHTML='<h1 class=\'text-xl font-bold text-brand-orange\'>URBAN GAZ</h1>'">
+            <img src="UGL web logo.png" alt="UrbanGaz Logo" class="h-10 object-contain" onerror="this.outerHTML='<h1 class=\'text-xl font-bold text-brand-orange\'>URBAN GAZ</h1>'">
         </div>
 
         <div class="flex items-center gap-8">
@@ -654,14 +655,94 @@
         </div>
     </div>
 
+    <!-- MAIN APP LOGIC WITH GOOGLE SHEETS BACKEND -->
     <script>
-        // Initialize Icons
+        // Global Variables
+        let activeManifold = 1;
+        let isSwitching = false;
+        let intendedManifold = null;
+        let currentProjectKey = 'MGC'; // Default initial project
+        let pressureChart = null;
+        let pollingInterval = null;
+
+        // ==========================================
+        // GOOGLE SHEETS BACKEND CONFIGURATION
+        // ==========================================
+        const MANIFOLD_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz1y_4bP4i50qOzc7lBjF-dIl0fhKx0dBPK6f-bnTpFbRE4Rv71JmXQPjV1cfgeovTG/exec'; 
+
+        // Fetch Real-time Cloud Changes via Polling
+        async function fetchManifoldState(projectKey) {
+            if (!MANIFOLD_SCRIPT_URL) return; 
+            
+            try {
+                const response = await fetch(`${MANIFOLD_SCRIPT_URL}?action=getState&projectKey=${projectKey}`);
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                if (data.active_manifold && data.active_manifold !== activeManifold) {
+                    setActiveManifoldUI(data.active_manifold);
+                }
+            } catch (error) {
+                // Silently ignore GET CORS errors, do NOT disable the system.
+            }
+        }
+
+        // Start Polling (checks every 10 seconds to save Google quotas)
+        function startPolling(projectKey) {
+            if (!MANIFOLD_SCRIPT_URL) return;
+            if (pollingInterval) clearInterval(pollingInterval);
+            
+            fetchManifoldState(projectKey);
+            pollingInterval = setInterval(() => {
+                fetchManifoldState(projectKey);
+            }, 10000); 
+        }
+
+        // Push new state to Google Sheets
+        async function pushManifoldState(manifoldNum) {
+            if (!MANIFOLD_SCRIPT_URL) return { success: true };
+            
+            try {
+                const now = new Date();
+                
+                // Construct the precise payload matching IoT device
+                const payload = {
+                    action: 'setState',
+                    projectSiteName: document.getElementById('detail-title').textContent, // e.g. "MGC - Muzaffar Garden City"
+                    projectKey: currentProjectKey, 
+                    franchise: 'Jamuna Gas',
+                    date: now.toLocaleDateString('en-GB'), // format: DD/MM/YYYY
+                    time: now.toLocaleTimeString('en-US', { hour12: false }), // format: HH:MM:SS
+                    lastTimeSwitched: now.toISOString(), // accurate universal timestamp
+                    activeManifold: manifoldNum,
+                    pin: '1234'
+                };
+
+                // CRITICAL FIX: mode 'no-cors' forces the browser to send the POST payload 
+                // to Google Sheets even if strict security policies usually block it.
+                await fetch(MANIFOLD_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', 
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify(payload)
+                });
+
+                // With no-cors, the response is opaque, so we assume success if no network crash occurred.
+                return { success: true, active_manifold: manifoldNum };
+            } catch(e) {
+                 console.error("Save to Google Sheets failed:", e);
+                 return { success: false, active_manifold: manifoldNum };
+            }
+        }
+
+        // Initial setup
         lucide.createIcons();
+        startPolling(currentProjectKey);
 
         // ----------------------------------------------------
         // Navigation / Routing Logic
         // ----------------------------------------------------
-        function navigate(viewName, projectTitle = null) {
+        window.navigate = function(viewName, projectTitle = null) {
             const viewList = document.getElementById('view-list');
             const viewDetail = document.getElementById('view-detail');
             const viewMap = document.getElementById('view-map');
@@ -686,183 +767,132 @@
                 statsRow.style.display = 'grid';
                 setTimeout(() => viewList.classList.add('active'), 10);
                 navProj.classList.replace('nav-item-inactive', 'nav-item-active');
+                if(pollingInterval) clearInterval(pollingInterval); // Stop polling on list
             } 
             else if (viewName === 'detail') {
                 statsRow.style.display = 'grid';
                 if (projectTitle) {
                     document.getElementById('detail-title').textContent = projectTitle;
+                    
+                    // Create a safe database key from the project title (e.g. "Kacchi vai" -> "Kacchivai")
+                    currentProjectKey = projectTitle.replace(/[^a-zA-Z0-9]/g, '');
+                    startPolling(currentProjectKey); 
                 }
                 setTimeout(() => viewDetail.classList.add('active'), 10);
                 
-                // Re-render chart to ensure size fits newly visible container
-                if (pressureChart) {
-                    setTimeout(() => pressureChart.resize(), 50);
-                }
+                if (pressureChart) setTimeout(() => pressureChart.resize(), 50);
             }
             else if (viewName === 'map') {
-                statsRow.style.display = 'none'; // Hide stats to give map full height
+                statsRow.style.display = 'none';
                 setTimeout(() => {
                     viewMap.classList.add('active');
-                    if(map) { map.invalidateSize(); } // Fix gray tiles issue on hidden map
+                    if(window.leafletMapObj) { window.leafletMapObj.invalidateSize(); }
                 }, 10);
                 navDist.classList.replace('nav-item-inactive', 'nav-item-active');
             }
             else if (viewName === 'inventory') {
-                statsRow.style.display = 'none'; // Hide stats
+                statsRow.style.display = 'none';
                 setTimeout(() => viewInventory.classList.add('active'), 10);
                 navInv.classList.replace('nav-item-inactive', 'nav-item-active');
             }
-        }
+        };
 
         // ----------------------------------------------------
-        // Custom Dropdown UI Logic
+        // UI Helpers (Made Global for onclick)
         // ----------------------------------------------------
-        function toggleDropdown(menuId) {
-            // Close all other menus first
+        window.toggleDropdown = function(menuId) {
             document.querySelectorAll('.mac-menu').forEach(menu => {
                 if(menu.id !== menuId) menu.classList.add('hidden');
             });
-            const menu = document.getElementById(menuId);
-            menu.classList.toggle('hidden');
-        }
+            document.getElementById(menuId).classList.toggle('hidden');
+        };
 
-        // Close dropdowns if clicking outside
         document.addEventListener('click', (e) => {
             if(!e.target.closest('.relative')) {
                 document.querySelectorAll('.mac-menu').forEach(menu => menu.classList.add('hidden'));
             }
         });
 
-        // Setup Selection Handlers
-        function selectCec(val) {
+        window.selectCec = function(val) {
             document.getElementById('cec-text').textContent = val;
             document.getElementById('cec-menu').classList.add('hidden');
-        }
+        };
 
-        function selectArea(val, text) {
+        window.selectArea = function(val, text) {
             document.getElementById('area-text').textContent = text;
             document.getElementById('mapAreaFilter').value = val;
             document.getElementById('area-menu').classList.add('hidden');
-            refreshMapState(); // Trigger map update
-        }
+            window.refreshMapState();
+        };
 
-        function selectCylinder(val, text) {
+        window.selectCylinder = function(val, text) {
             document.getElementById('cylinder-text').textContent = text;
             document.getElementById('cylinderFilter').value = val;
             document.getElementById('cylinder-menu').classList.add('hidden');
-            refreshMapState(); // Trigger map update
-        }
+            window.refreshMapState();
+        };
 
         // ----------------------------------------------------
-        // Chart.js Configuration
+        // Chart.js Setup
         // ----------------------------------------------------
         const ctx = document.getElementById('pressureChart').getContext('2d');
-        
-        // Custom plugin to draw vertical crossover highlight background (like in image)
         const crossoverHighlightPlugin = {
             id: 'crossoverHighlight',
             beforeDraw: (chart) => {
                 if (chart.tooltip && chart.tooltip._active && chart.tooltip._active.length) {
                     const activePoint = chart.tooltip._active[0];
-                    const ctx = chart.ctx;
+                    const chctx = chart.ctx;
                     const x = activePoint.element.x;
                     const topY = chart.scales.y.top;
                     const bottomY = chart.scales.y.bottom;
                     
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.moveTo(x, topY);
-                    ctx.lineTo(x, bottomY);
-                    ctx.lineWidth = 40;
-                    ctx.strokeStyle = 'rgba(241, 90, 36, 0.1)'; // Brand orange light
-                    ctx.stroke();
-                    ctx.restore();
+                    chctx.save();
+                    chctx.beginPath();
+                    chctx.moveTo(x, topY);
+                    chctx.lineTo(x, bottomY);
+                    chctx.lineWidth = 40;
+                    chctx.strokeStyle = 'rgba(241, 90, 36, 0.1)';
+                    chctx.stroke();
+                    chctx.restore();
                 }
             }
         };
 
         const labels = ['10.00', '11.00', '12.00', '13.00', '14.00', '15.00', '16.00', '17.00', '18.00', '19.00', '20.00', '21.00', '22.00'];
-        
-        // Finalized array points for demonstration crossover
         const finalDataM1 = [5.2, 5.9, 5.7, 5.9, 5.9, 5.9, 6.0, 4.2, 2.2, 2.9, 2.4, 2.4, 2.5]; 
         const finalDataM2 = [2.8, 2.8, 2.7, 2.8, 2.8, 2.8, 2.9, 3.8, 5.5, 4.5, 5.2, 5.2, 4.9];
 
-        const pressureChart = new Chart(ctx, {
+        pressureChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [
-                    {
-                        label: 'Manifold 1',
-                        data: finalDataM1,
-                        borderColor: '#22C55E', // Green
-                        backgroundColor: '#22C55E',
-                        borderWidth: 2.5,
-                        tension: 0.4,
-                        pointRadius: 0,
-                        pointHoverRadius: 6
-                    },
-                    {
-                        label: 'Manifold 2',
-                        data: finalDataM2,
-                        borderColor: '#F15A24', // Orange
-                        backgroundColor: '#F15A24',
-                        borderWidth: 2.5,
-                        tension: 0.4,
-                        pointRadius: 0,
-                        pointHoverRadius: 6
-                    }
+                    { label: 'Manifold 1', data: finalDataM1, borderColor: '#22C55E', backgroundColor: '#22C55E', borderWidth: 2.5, tension: 0.4, pointRadius: 0, pointHoverRadius: 6 },
+                    { label: 'Manifold 2', data: finalDataM2, borderColor: '#F15A24', backgroundColor: '#F15A24', borderWidth: 2.5, tension: 0.4, pointRadius: 0, pointHoverRadius: 6 }
                 ]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
+                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        titleColor: '#333',
-                        bodyColor: '#555',
-                        borderColor: '#e2e8f0',
-                        borderWidth: 1,
-                        padding: 10,
-                        boxPadding: 4,
-                        usePointStyle: true,
-                        callbacks: {
-                            label: function(context) {
-                                return ` ${context.dataset.label}: ${context.parsed.y} Bar`;
-                            }
-                        }
+                        backgroundColor: 'rgba(255, 255, 255, 0.95)', titleColor: '#333', bodyColor: '#555',
+                        borderColor: '#e2e8f0', borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+                        callbacks: { label: function(context) { return ` ${context.dataset.label}: ${context.parsed.y} Bar`; } }
                     }
                 },
                 scales: {
-                    y: {
-                        min: 0,
-                        max: 9,
-                        ticks: { stepSize: 1, color: '#94a3b8', font: { family: "'JetBrains Mono', monospace", size: 10 } },
-                        grid: { borderDash: [4, 4], color: '#f1f5f9', drawBorder: false }
-                    },
-                    x: {
-                        ticks: { color: '#94a3b8', font: { family: "'JetBrains Mono', monospace", size: 10 } },
-                        grid: { display: false, drawBorder: false }
-                    }
+                    y: { min: 0, max: 9, ticks: { stepSize: 1, color: '#94a3b8', font: { family: "'JetBrains Mono', monospace", size: 10 } }, grid: { borderDash: [4, 4], color: '#f1f5f9', drawBorder: false } },
+                    x: { ticks: { color: '#94a3b8', font: { family: "'JetBrains Mono', monospace", size: 10 } }, grid: { display: false, drawBorder: false } }
                 }
             },
             plugins: [crossoverHighlightPlugin]
         });
 
         // ----------------------------------------------------
-        // Business Logic: Manifold Switching Simulation
+        // Business Logic: Secure Manifold Switching
         // ----------------------------------------------------
-        let activeManifold = 1; // 1 or 2
-        let isSwitching = false;
-        let intendedManifold = null;
-
-        function initiateSwitch() {
+        window.initiateSwitch = function() {
             if (isSwitching) return;
             
             intendedManifold = activeManifold === 1 ? 2 : 1;
@@ -871,82 +901,81 @@
             const input = document.getElementById('pin-input');
             const error = document.getElementById('pin-error');
             
-            // Reset modal state
             error.classList.remove('opacity-100');
             input.classList.remove('border-red-500', 'text-red-500');
             input.value = '';
             
-            // Show modal with animation
             modal.classList.remove('hidden');
             setTimeout(() => {
                 modal.classList.add('modal-enter');
                 input.focus();
             }, 10);
-        }
+        };
 
-        function closePinModal() {
+        window.closePinModal = function() {
             const modal = document.getElementById('pin-modal');
             modal.classList.remove('modal-enter');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-            }, 300);
-        }
+            setTimeout(() => { modal.classList.add('hidden'); }, 300);
+        };
 
-        function submitPin() {
+        window.submitPin = function() {
             const input = document.getElementById('pin-input');
             const error = document.getElementById('pin-error');
             
             if (input.value === '1234') {
-                closePinModal();
-                executeSwitch(intendedManifold);
+                window.closePinModal();
+                executeSwitchToCloud(intendedManifold);
             } else {
-                // Invalid PIN animation
                 input.classList.add('shake', 'border-red-500', 'text-red-500');
                 error.classList.add('opacity-100');
-                
-                setTimeout(() => {
-                    input.classList.remove('shake');
-                }, 400);
+                setTimeout(() => { input.classList.remove('shake'); }, 400);
             }
-        }
+        };
 
-        function executeSwitch(targetManifold) {
+        async function executeSwitchToCloud(targetManifold) {
             isSwitching = true;
             const btn = document.getElementById('btn-manual-switch');
             
-            // Loading State
             btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 spinner"></i> Actuating Valve...';
             btn.disabled = true;
             btn.classList.add('opacity-70', 'cursor-not-allowed');
             lucide.createIcons();
 
-            // Simulate mechanical delay (2 seconds)
-            setTimeout(() => {
-                activeManifold = targetManifold;
+            try {
+                // Send command to your Google Apps Script
+                await pushManifoldState(targetManifold);
+            } catch(e) {
+                console.warn("Manual switch executed locally due to network failure.");
+            } finally {
+                // On success or fallback, update UI and log immediately
+                setActiveManifoldUI(targetManifold);
+                addHistoryLog(targetManifold);
+                
                 isSwitching = false;
-                updateUIPostSwitch();
-                addHistoryLog();
-            }, 2000);
+                btn.innerHTML = `<i data-lucide="arrow-right-left" class="w-4 h-4"></i> Switch to Manifold ${targetManifold === 1 ? 2 : 1}`;
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+                lucide.createIcons();
+            }
         }
 
-        function updateUIPostSwitch() {
+        function setActiveManifoldUI(targetManifold) {
+            if(activeManifold === targetManifold) return; // Prevent redundant updates
+            activeManifold = targetManifold;
+            
             const btn = document.getElementById('btn-manual-switch');
             const ind1 = document.getElementById('ui-manifold-1-indicator');
             const ind2 = document.getElementById('ui-manifold-2-indicator');
-            
             const card = document.getElementById('active-manifold-card');
             const panelTitle = document.getElementById('panel-manifold-title');
             const panelPres = document.getElementById('panel-pressure-val');
 
             if (activeManifold === 2) {
-                // Update Top Indicators
                 ind1.classList.replace('manifold-circle-active', 'manifold-circle-reserve');
                 ind1.querySelector('.uppercase.mt-1').textContent = 'Reserve';
-                
                 ind2.classList.replace('manifold-circle-reserve', 'manifold-circle-active');
                 ind2.querySelector('.uppercase.mt-1').textContent = 'Active';
 
-                // Update Side Panel (Switch to Orange/Manifold 2 Theme)
                 card.classList.replace('bg-brand-greenLight', 'bg-brand-orangeLight');
                 card.classList.replace('border-green-200', 'border-orange-200');
                 
@@ -958,17 +987,13 @@
                 panelPres.parentElement.classList.replace('border-green-500/20', 'border-orange-500/20');
                 panelPres.textContent = 'P2: 5.5';
 
-                // Reset Button
                 btn.innerHTML = '<i data-lucide="arrow-right-left" class="w-4 h-4"></i> Switch to Manifold 1';
             } else {
-                // Revert to Manifold 1
                 ind2.classList.replace('manifold-circle-active', 'manifold-circle-reserve');
                 ind2.querySelector('.uppercase.mt-1').textContent = 'Reserve';
-                
                 ind1.classList.replace('manifold-circle-reserve', 'manifold-circle-active');
                 ind1.querySelector('.uppercase.mt-1').textContent = 'Active';
 
-                // Update Side Panel (Switch to Green/Manifold 1 Theme)
                 card.classList.replace('bg-brand-orangeLight', 'bg-brand-greenLight');
                 card.classList.replace('border-orange-200', 'border-green-200');
                 
@@ -980,23 +1005,16 @@
                 panelPres.parentElement.classList.replace('border-orange-500/20', 'border-green-500/20');
                 panelPres.textContent = 'P1: 4.3';
 
-                // Reset Button
                 btn.innerHTML = '<i data-lucide="arrow-right-left" class="w-4 h-4"></i> Switch to Manifold 2';
             }
-
-            btn.disabled = false;
-            btn.classList.remove('opacity-70', 'cursor-not-allowed');
             lucide.createIcons();
         }
 
-        function addHistoryLog() {
+        function addHistoryLog(targetManifold) {
             const historyContainer = document.getElementById('switch-history');
-            
             const now = new Date();
             const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-            const isManifold2 = activeManifold === 2;
-            const bgColor = isManifold2 ? 'bg-brand-orange' : 'bg-green-500';
+            const bgColor = targetManifold === 2 ? 'bg-brand-orange' : 'bg-green-500';
 
             const logEntryHTML = `
                 <div class="flex gap-3 relative animate-pulse">
@@ -1005,19 +1023,15 @@
                     </div>
                     <div class="pb-4 border-l border-slate-200 absolute left-3 top-6 h-full z-0"></div>
                     <div>
-                        <div class="text-sm font-bold text-slate-800">Manifold ${activeManifold}</div>
+                        <div class="text-sm font-bold text-slate-800">Manifold ${targetManifold}</div>
                         <div class="text-xs text-slate-500 font-mono mt-0.5">Just now<br>${timeStr}</div>
                     </div>
                 </div>
             `;
 
-            // Insert at top
             historyContainer.insertAdjacentHTML('afterbegin', logEntryHTML);
             lucide.createIcons();
-            
-            setTimeout(() => {
-                historyContainer.firstElementChild.classList.remove('animate-pulse');
-            }, 1500);
+            setTimeout(() => { historyContainer.firstElementChild.classList.remove('animate-pulse'); }, 1500);
         }
 
         // ----------------------------------------------------
@@ -1025,24 +1039,22 @@
         // ----------------------------------------------------
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQFg_J_J2K7XVcT4MyTSDkiWyZBVpqBjLBqON7UZgDVi0dh1a3zwh4LeG7ioq3Uu4/exec";
         
-        let map = null;
+        let mapObj = null;
         let markersLayer = null;
         let routingControl = null;
         let allMapData = []; 
 
         function initMap() {
-            // Standard Street Map View (Clean)
-            map = L.map('leafletMap', {zoomControl: false}).setView([23.8103, 90.4125], 11);
-            L.control.zoom({position: 'bottomright'}).addTo(map);
+            mapObj = L.map('leafletMap', {zoomControl: false}).setView([23.8103, 90.4125], 11);
+            window.leafletMapObj = mapObj; // make available to navigation resize
+            L.control.zoom({position: 'bottomright'}).addTo(mapObj);
 
-            // Light Map Tiles for Professional Look
             L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-                subdomains: 'abcd',
-                maxZoom: 20
-            }).addTo(map);
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                subdomains: 'abcd', maxZoom: 20
+            }).addTo(mapObj);
 
-            markersLayer = L.layerGroup().addTo(map);
+            markersLayer = L.layerGroup().addTo(mapObj);
             fetchMapData();
         }
 
@@ -1050,70 +1062,47 @@
             try {
                 const res = await fetch(`${SCRIPT_URL}?action=getMapData`);
                 const data = await res.json();
-                
                 if(data.status === 'success' && data.locations) {
                     allMapData = data.locations;
                     populateDropdowns(allMapData);
-                    refreshMapState(); // Default view
+                    window.refreshMapState();
                 }
             } catch(e) {
                 console.error("Map Error", e);
-                // Graceful fallback if Apps Script fails to load
             }
         }
 
         function populateDropdowns(data) {
             const areas = new Set();
             const cylinders = new Set();
+            data.forEach(loc => { if(loc.area) areas.add(loc.area); if(loc.id) cylinders.add(loc.id); });
 
-            data.forEach(loc => {
-                if(loc.area) areas.add(loc.area);
-                if(loc.id) cylinders.add(loc.id);
-            });
-
-            // Populate Areas into Custom Glass Dropdown
             const areaMenu = document.getElementById('area-menu');
             areaMenu.innerHTML = `<div class="mac-menu-item" onclick="selectArea('all', 'All Zones')">All Zones</div>`;
-            Array.from(areas).sort().forEach(a => {
-                areaMenu.innerHTML += `<div class="mac-menu-item" onclick="selectArea('${a}', '${a}')">${a}</div>`;
-            });
+            Array.from(areas).sort().forEach(a => { areaMenu.innerHTML += `<div class="mac-menu-item" onclick="selectArea('${a}', '${a}')">${a}</div>`; });
 
-            // Populate Cylinders into Custom Glass Dropdown
             const cylMenu = document.getElementById('cylinder-menu');
             cylMenu.innerHTML = `<div class="mac-menu-item" onclick="selectCylinder('', 'Select ID...')">Select ID...</div>`;
-            Array.from(cylinders).sort().forEach(id => {
-                cylMenu.innerHTML += `<div class="mac-menu-item" onclick="selectCylinder('${id}', '${id}')">${id}</div>`;
-            });
+            Array.from(cylinders).sort().forEach(id => { cylMenu.innerHTML += `<div class="mac-menu-item" onclick="selectCylinder('${id}', '${id}')">${id}</div>`; });
         }
 
         function isDateInRange(itemDateStr) {
             const fromVal = document.getElementById('dateFrom').value;
             const toVal = document.getElementById('dateTo').value;
-            
-            if (!fromVal && !toVal) return true; // No filter
+            if (!fromVal && !toVal) return true; 
             
             const itemDate = new Date(itemDateStr).setHours(0,0,0,0);
-            
-            if (fromVal) {
-                const fromDate = new Date(fromVal).setHours(0,0,0,0);
-                if (itemDate < fromDate) return false;
-            }
-            
-            if (toVal) {
-                const toDate = new Date(toVal).setHours(0,0,0,0);
-                if (itemDate > toDate) return false;
-            }
-            
+            if (fromVal && itemDate < new Date(fromVal).setHours(0,0,0,0)) return false;
+            if (toVal && itemDate > new Date(toVal).setHours(0,0,0,0)) return false;
             return true;
         }
 
-        function refreshMapState() {
+        window.refreshMapState = function() {
             const cylId = document.getElementById('cylinderFilter').value;
             const area = document.getElementById('mapAreaFilter').value;
             
             if (cylId) {
                 if(area !== 'all') {
-                    // UI Cleanup: Reset area visually if searching cylinder
                     document.getElementById('mapAreaFilter').value = 'all'; 
                     document.getElementById('area-text').textContent = 'All Zones';
                 }
@@ -1121,27 +1110,20 @@
             } else {
                 renderAreaPins(area);
             }
-        }
+        };
 
         function renderAreaPins(area) {
             clearRouting();
             markersLayer.clearLayers();
             
-            const filtered = allMapData.filter(l => {
-                const matchesArea = area === 'all' ? true : l.area === area;
-                return matchesArea && isDateInRange(l.date);
-            });
-            
+            const filtered = allMapData.filter(l => (area === 'all' || l.area === area) && isDateInRange(l.date));
             filtered.forEach(loc => {
                 const coords = parseCoords(loc.link);
                 if(coords) {
                     const icon = L.divIcon({className: 'dot-marker', iconSize: [12, 12]});
-                    L.marker(coords, {icon: icon})
-                     .bindPopup(createPopup(loc))
-                     .addTo(markersLayer);
+                    L.marker(coords, {icon: icon}).bindPopup(createPopup(loc)).addTo(markersLayer);
                 }
             });
-            
             if(filtered.length > 0) fitMapToBounds();
         }
 
@@ -1149,60 +1131,40 @@
             clearRouting();
             markersLayer.clearLayers();
 
-            const cylinderHistory = allMapData.filter(l => {
-                return l.id === cylId && isDateInRange(l.date);
-            });
-            
+            const cylinderHistory = allMapData.filter(l => l.id === cylId && isDateInRange(l.date));
             cylinderHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
 
             const waypoints = [];
-            
             cylinderHistory.forEach((loc, index) => {
                 const coords = parseCoords(loc.link);
                 if(coords) {
                     const isLast = index === cylinderHistory.length - 1;
-                    
-                    let className = isLast ? 'live-marker' : 'history-marker';
-                    let zIndex = isLast ? 1000 : 100;
-
+                    const className = isLast ? 'live-marker' : 'history-marker';
+                    const zIndex = isLast ? 1000 : 100;
                     const icon = L.divIcon({className: className, iconSize: [16, 16]});
                     
                     L.marker(coords, {icon: icon, zIndexOffset: zIndex})
                      .bindPopup(createPopup(loc, isLast ? "Latest Position" : `History Stop #${index + 1}`))
                      .addTo(markersLayer);
-
                     waypoints.push(L.latLng(coords[0], coords[1]));
                 }
             });
 
             if (waypoints.length > 1) {
-                drawRoute(waypoints);
+                routingControl = L.Routing.control({
+                    waypoints: waypoints,
+                    router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+                    lineOptions: { styles: [{color: 'black', opacity: 0.2, weight: 6}, {color: '#3b82f6', opacity: 0.8, weight: 4, dashArray: '10, 10'}] },
+                    createMarker: () => null, addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true, show: false
+                }).addTo(mapObj);
             } else if (waypoints.length === 1) {
                 fitMapToBounds(); 
             }
         }
 
-        function drawRoute(waypoints) {
-            routingControl = L.Routing.control({
-                waypoints: waypoints,
-                router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
-                lineOptions: {
-                    styles: [
-                        {color: 'black', opacity: 0.2, weight: 6}, // Shadow
-                        {color: '#3b82f6', opacity: 0.8, weight: 4, dashArray: '10, 10'} // Blue Path
-                    ]
-                },
-                createMarker: function() { return null; }, 
-                addWaypoints: false,
-                draggableWaypoints: false,
-                fitSelectedRoutes: true, 
-                show: false
-            }).addTo(map);
-        }
-
         function clearRouting() {
             if (routingControl) {
-                map.removeControl(routingControl);
+                mapObj.removeControl(routingControl);
                 routingControl = null;
             }
         }
@@ -1218,16 +1180,13 @@
         }
 
         function createPopup(loc, title = "Cylinder Info") {
-            const dateObj = new Date(loc.date);
-            const date = dateObj.toLocaleDateString();
-            const time = dateObj.toLocaleTimeString();
             return `
                 <div class="popup-content">
                     <div style="font-weight:bold; color:#1e293b; margin-bottom:4px; border-bottom:1px solid #e2e8f0;">${title}</div>
                     <div><b>ID:</b> ${loc.id}</div>
                     <div><b>Area:</b> ${loc.area}</div>
-                    <div><b>Date:</b> ${date}</div>
-                    <div style="color:#64748b; font-size:10px;">${time}</div>
+                    <div><b>Date:</b> ${new Date(loc.date).toLocaleDateString()}</div>
+                    <div style="color:#64748b; font-size:10px;">${new Date(loc.date).toLocaleTimeString()}</div>
                 </div>
             `;
         }
@@ -1235,15 +1194,13 @@
         function fitMapToBounds() {
             if(markersLayer.getLayers().length > 0) {
                 const group = new L.featureGroup(markersLayer.getLayers());
-                map.fitBounds(group.getBounds().pad(0.1));
+                mapObj.fitBounds(group.getBounds().pad(0.1));
             } else {
-                map.setView([23.8103, 90.4125], 11);
+                mapObj.setView([23.8103, 90.4125], 11);
             }
         }
 
-        // Init Map on load
         window.addEventListener('load', initMap);
-
     </script>
 </body>
 </html>
