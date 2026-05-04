@@ -25,6 +25,12 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 
+    <!-- SheetJS for Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- jsPDF for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -262,6 +268,9 @@
                 </a>
                 <a href="#" id="nav-distribution" class="nav-item-inactive rounded-xl px-4 py-3 text-sm font-semibold shadow-sm border border-orange-100 opacity-80 hover:opacity-100 transition-opacity btn-press" onclick="navigate('map')">
                     Distribution Tracker
+                </a>
+                <a href="#" id="nav-billing" class="nav-item-inactive rounded-xl px-4 py-3 text-sm font-semibold shadow-sm border border-orange-100 opacity-80 hover:opacity-100 transition-opacity btn-press" onclick="navigate('billing')">
+                    Billing Automation
                 </a>
                 <a href="#" id="nav-inventory" class="nav-item-inactive rounded-xl px-4 py-3 text-sm font-semibold shadow-sm border border-orange-100 opacity-80 hover:opacity-100 transition-opacity btn-press" onclick="navigate('inventory')">
                     Inventory Status
@@ -622,7 +631,73 @@
 
             </div>
 
-            <!-- VIEW 4: INVENTORY STATUS -->
+            <!-- VIEW 4: BILLING AUTOMATION -->
+            <div id="view-billing" class="view-section flex-col gap-6 h-full min-h-[600px] bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex-1">
+                <div class="bg-white px-6 py-4 flex flex-wrap gap-4 items-center z-20 shadow-sm border-b border-slate-200">
+                    <div class="flex items-center gap-3 border-r border-slate-200 pr-4 mr-2">
+                        <div class="w-8 h-8 bg-brand-orange rounded-lg flex items-center justify-center text-white">
+                            <i data-lucide="calculator" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <h1 class="font-bold text-slate-800 text-lg leading-none">Billing Automation</h1>
+                        </div>
+                    </div>
+                    
+                    <!-- File Upload -->
+                    <div class="flex items-center gap-3 ml-auto">
+                        <label for="excel-upload" class="bg-brand-orange text-white px-4 py-2 rounded-xl font-bold btn-press shadow-sm hover:bg-orange-600 transition-colors cursor-pointer flex items-center gap-2 text-sm">
+                            <i data-lucide="upload" class="w-4 h-4"></i> Upload Excel/CSV
+                        </label>
+                        <input type="file" id="excel-upload" accept=".xlsx,.csv" class="hidden" multiple onchange="handleFileUpload(event)">
+                        
+                        <button onclick="addFranchiseModal()" class="bg-slate-100 text-slate-700 px-4 py-2 rounded-xl font-bold btn-press shadow-sm hover:bg-slate-200 transition-colors flex items-center gap-2 text-sm">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Add Entity
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex flex-1 overflow-hidden p-6 gap-6">
+                    <!-- Tree Hierarchy Sidebar -->
+                    <div class="w-64 bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-y-auto flex flex-col gap-2 shadow-inner" id="billing-tree">
+                        <h3 class="font-bold text-slate-700 text-sm mb-2 border-b border-slate-200 pb-2">Franchise Hierarchy</h3>
+                        <!-- Tree will be populated here -->
+                    </div>
+
+                    <!-- Billing Details Area -->
+                    <div class="flex-1 flex flex-col gap-4 overflow-y-auto relative" id="billing-content">
+                        <div class="bg-blue-50 text-blue-800 p-4 rounded-xl border border-blue-200 flex items-center gap-3 mb-2 shrink-0">
+                            <i data-lucide="info" class="w-5 h-5 text-blue-500 shrink-0"></i>
+                            <p class="text-sm font-medium">Please upload the monthly billing Excel files. The system calculates: Consumption = (Current - Previous), Total = Consumption * Rate + 6% MF.</p>
+                        </div>
+                        
+                        <div id="billing-table-container" class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden hidden flex-1 flex-col">
+                            <div class="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                                <h3 class="font-bold text-slate-800" id="billing-table-title">Project Data</h3>
+                                <div class="text-sm font-mono bg-white px-3 py-1 rounded border border-slate-200" id="billing-unit-price">Rate: - TAKA/m3</div>
+                            </div>
+                            <div class="overflow-y-auto flex-1">
+                                <table class="w-full text-sm text-left text-slate-600">
+                                    <thead class="text-xs text-slate-700 uppercase bg-slate-50 sticky top-0 shadow-sm z-10">
+                                        <tr>
+                                            <th scope="col" class="px-4 py-3">Flat / User</th>
+                                            <th scope="col" class="px-4 py-3">Prev. Read</th>
+                                            <th scope="col" class="px-4 py-3">Curr. Read</th>
+                                            <th scope="col" class="px-4 py-3">Cons. (m3)</th>
+                                            <th scope="col" class="px-4 py-3">Total (BDT)</th>
+                                            <th scope="col" class="px-4 py-3 text-center">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="billing-tbody" class="divide-y divide-slate-100">
+                                        <!-- Rows added dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 5: INVENTORY STATUS -->
             <div id="view-inventory" class="view-section flex-col gap-6 items-center justify-center h-full min-h-[500px] bg-white rounded-xl border border-slate-200 shadow-sm flex-1">
                 <div class="w-20 h-20 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mb-2">
                     <i data-lucide="package-search" class="w-10 h-10"></i>
@@ -746,9 +821,11 @@
             const viewList = document.getElementById('view-list');
             const viewDetail = document.getElementById('view-detail');
             const viewMap = document.getElementById('view-map');
+            const viewBilling = document.getElementById('view-billing');
             const viewInventory = document.getElementById('view-inventory');
             const navProj = document.getElementById('nav-project-status');
             const navDist = document.getElementById('nav-distribution');
+            const navBilling = document.getElementById('nav-billing');
             const navInv = document.getElementById('nav-inventory');
             const statsRow = document.getElementById('stats-row');
 
@@ -756,11 +833,13 @@
             viewList.classList.remove('active');
             viewDetail.classList.remove('active');
             viewMap.classList.remove('active');
+            viewBilling.classList.remove('active');
             viewInventory.classList.remove('active');
             
             // Reset Nav Styles
             navProj.classList.replace('nav-item-active', 'nav-item-inactive');
             navDist.classList.replace('nav-item-active', 'nav-item-inactive');
+            navBilling.classList.replace('nav-item-active', 'nav-item-inactive');
             navInv.classList.replace('nav-item-active', 'nav-item-inactive');
 
             if (viewName === 'list') {
@@ -789,6 +868,11 @@
                     if(window.leafletMapObj) { window.leafletMapObj.invalidateSize(); }
                 }, 10);
                 navDist.classList.replace('nav-item-inactive', 'nav-item-active');
+            }
+            else if (viewName === 'billing') {
+                statsRow.style.display = 'none';
+                setTimeout(() => viewBilling.classList.add('active'), 10);
+                navBilling.classList.replace('nav-item-inactive', 'nav-item-active');
             }
             else if (viewName === 'inventory') {
                 statsRow.style.display = 'none';
@@ -1202,5 +1286,7 @@
 
         window.addEventListener('load', initMap);
     </script>
+    <!-- Include Custom Billing Logic -->
+    <script src="billing.js"></script>
 </body>
 </html>
