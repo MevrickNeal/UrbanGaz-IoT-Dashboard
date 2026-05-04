@@ -4,6 +4,8 @@ let globalRate = 250;
 let billingMonth = "APRIL @ 2026";
 let issuingMonth = "MAY @ 2026";
 let dueDateStr = "15TH MAY, 2026";
+let currDateStr = "27/04/26";
+let prevDateStr = "31/03/26";
 
 // Handle Excel Upload
 function handleFileUpload(event) {
@@ -117,10 +119,11 @@ function updateGlobalSettings() {
     billingMonth = document.getElementById('setting-bill-month').value || "APRIL @ 2026";
     issuingMonth = document.getElementById('setting-issue-month').value || "MAY @ 2026";
     dueDateStr = document.getElementById('setting-due-date').value || "15TH MAY, 2026";
+    currDateStr = document.getElementById('setting-curr-date').value || "27/04/26";
+    prevDateStr = document.getElementById('setting-prev-date').value || "31/03/26";
     
     if(currentProject) {
         currentProject.data.rate = globalRate;
-        // Recalculate totals
         currentProject.data.flats.forEach(f => {
             f.total = (f.consumption * globalRate * 1.06).toFixed(2);
         });
@@ -226,86 +229,128 @@ function generatePDF(flat) {
     const doc = new jsPDF();
     
     function drawHalf(yOffset, isCustomer) {
+        // TOP LEFT DETAILS
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text("NAME : " + currentProject.pName, 15, yOffset + 20);
+        doc.text("C/O : " + (currentProject.data.address || "Address not set"), 15, yOffset + 25);
+        doc.text("FLAT NO " + flat.flatNo, 15, yOffset + 35);
+        doc.text("FLAT OWNER : " + flat.ownerName, 60, yOffset + 35);
+        doc.text("BILLING MONTH : " + billingMonth, 15, yOffset + 45);
+        doc.text("BILL ISSUING MONTH : " + issuingMonth, 15, yOffset + 50);
+
+        // TOP RIGHT HEADER
+        doc.line(140, yOffset + 15, 140, yOffset + 35);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(16);
-        doc.text("GAS BILL", 105, yOffset + 15, { align: "center" });
-        doc.setFontSize(10);
-        doc.text(isCustomer ? "CUSTOMER COPY" : "OFFICE COPY", 105, yOffset + 22, { align: "center" });
+        doc.setFontSize(20);
+        doc.text("GAS BILL", 145, yOffset + 23);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(12);
+        doc.text(isCustomer ? "CUSTOMER COPY" : "OFFICE COPY", 145, yOffset + 30);
 
-        doc.setFontSize(10);
-        doc.text("NAME : " + currentProject.pName, 15, yOffset + 35);
-        doc.text("C/O : " + currentProject.data.address, 15, yOffset + 40);
+        // TABLE
+        const Y_START = yOffset + 60;
+        const R_HEIGHT = 7;
+        const X0 = 15, X1 = 45, X2 = 75, X3 = 105, X4 = 160, X5 = 195;
+
+        // Draw Outer Box and inner horizontal lines
+        doc.rect(X0, Y_START, 180, 70); // 10 rows
+        for(let i=1; i<10; i++) {
+            doc.line(X0, Y_START + i*R_HEIGHT, X5, Y_START + i*R_HEIGHT);
+        }
         
-        doc.text("FLAT NO: " + flat.flatNo, 15, yOffset + 50);
-        doc.text("FLAT OWNER: " + flat.ownerName, 60, yOffset + 50);
+        // Draw Vertical Lines
+        doc.line(X1, Y_START, X1, Y_START + 70);
+        doc.line(X2, Y_START, X2, Y_START + 70);
+        doc.line(X3, Y_START, X3, Y_START + 70);
+        doc.line(X4, Y_START, X4, Y_START + 70);
 
-        doc.text("BILLING MONTH: " + billingMonth, 15, yOffset + 60);
-        doc.text("BILL ISSUING MONTH: " + issuingMonth, 15, yOffset + 65);
-
-        // Borders
-        doc.rect(15, yOffset + 70, 180, 50);
-        doc.line(15, yOffset + 77, 195, yOffset + 77); // Header bottom
-        doc.line(105, yOffset + 70, 105, yOffset + 120); // Center split
-
-        // Left Table (Reading)
-        doc.setFontSize(8);
-        doc.text("DATE", 20, yOffset + 75);
-        doc.text("METER READING", 60, yOffset + 75);
-        
-        doc.text("CURRENT READING", 20, yOffset + 85);
-        doc.text("27/04/26", 60, yOffset + 85);
-        doc.text(flat.currRead, 85, yOffset + 85);
-
-        doc.text("PREVIOUS READING", 20, yOffset + 95);
-        doc.text("31/03/26", 60, yOffset + 95);
-        doc.text(flat.prevRead, 85, yOffset + 95);
-
-        doc.text("DIFFERENCE [M3]", 20, yOffset + 105);
-        doc.text(flat.consumption, 85, yOffset + 105);
-
-        doc.text("UNIT PRICE [BDT/M3]", 20, yOffset + 115);
-        doc.text(currentProject.data.rate.toString(), 85, yOffset + 115);
-
-        // Right Table (Particulars)
-        doc.text("PARTICULARS", 110, yOffset + 75);
-        doc.text("TAKA", 175, yOffset + 75);
-
+        // CALCULATIONS
         let gasBill = (flat.consumption * currentProject.data.rate).toFixed(2);
-        let mf = (gasBill * 0.06).toFixed(2);
-
-        doc.text("USED GAS BILL", 110, yOffset + 85);
-        doc.text(gasBill, 175, yOffset + 85);
-
-        doc.text("MANAGEMENT FEE [6%]", 110, yOffset + 95);
-        doc.text(mf, 175, yOffset + 95);
-
-        doc.text("TOTAL", 110, yOffset + 105);
-        doc.text(flat.total, 175, yOffset + 105);
-
+        let mf = (flat.consumption * currentProject.data.rate * 0.06).toFixed(2);
         let surcharge = (flat.total * 0.05).toFixed(2);
         let totalDue = (parseFloat(flat.total) + parseFloat(surcharge)).toFixed(2);
 
-        doc.text("5% SURCHARGE [AFTER DUE DATE]", 110, yOffset + 112);
-        doc.text(surcharge, 175, yOffset + 112);
+        doc.setFontSize(8);
 
-        doc.text("TOTAL BILL [AFTER DUE DATE]", 110, yOffset + 118);
-        doc.text(totalDue, 175, yOffset + 118);
+        // Row 1 (Index 0)
+        doc.setFont("helvetica", "bold");
+        doc.text("FLAT NO", X0 + 2, Y_START + 5);
+        doc.text(flat.flatNo, X1 + 2, Y_START + 5);
+        doc.text("FLAT OWNER", X2 + 2, Y_START + 5);
+        doc.setFont("helvetica", "normal");
+        doc.text(flat.ownerName, X3 + 2, Y_START + 5);
 
-        // Footers
-        doc.text("DUE DATE: " + dueDateStr, 15, yOffset + 130);
+        // Row 2
+        doc.setFont("helvetica", "bold");
+        doc.text("BILLING MONTH", X0 + 2, Y_START + R_HEIGHT + 5);
+        doc.setFont("helvetica", "normal");
+        doc.text(billingMonth, X1 + 2, Y_START + R_HEIGHT + 5);
+        doc.text("PARTICULARS", X3 + 2, Y_START + R_HEIGHT + 5);
+        doc.text("TAKA", X4 + 2, Y_START + R_HEIGHT + 5);
+
+        // Row 3
+        doc.text("BILL ISSUING MONTH", X0 + 2, Y_START + 2*R_HEIGHT + 5);
+        doc.text(issuingMonth, X1 + 2, Y_START + 2*R_HEIGHT + 5);
+        doc.text("USED GAS BILL", X3 + 2, Y_START + 2*R_HEIGHT + 5);
+        doc.text(gasBill, X4 + 2, Y_START + 2*R_HEIGHT + 5);
+
+        // Row 4
+        doc.text("DATE", X1 + 2, Y_START + 3*R_HEIGHT + 5);
+        doc.text("METER READING", X2 + 2, Y_START + 3*R_HEIGHT + 5);
+        doc.text("MANAGEMENT FEE [6%]", X3 + 2, Y_START + 3*R_HEIGHT + 5);
+        doc.text(mf, X4 + 2, Y_START + 3*R_HEIGHT + 5);
+
+        // Row 5
+        doc.text("CURRENT READING", X0 + 2, Y_START + 4*R_HEIGHT + 5);
+        doc.text(currDateStr, X1 + 2, Y_START + 4*R_HEIGHT + 5);
+        doc.text(flat.currRead, X2 + 2, Y_START + 4*R_HEIGHT + 5);
+        doc.setFont("helvetica", "bold");
+        doc.text("TOTAL", X3 + 2, Y_START + 4*R_HEIGHT + 5);
+        doc.text(flat.total, X4 + 2, Y_START + 4*R_HEIGHT + 5);
+        doc.setFont("helvetica", "normal");
+
+        // Row 6
+        doc.text("PREVIOUS READING", X0 + 2, Y_START + 5*R_HEIGHT + 5);
+        doc.text(prevDateStr, X1 + 2, Y_START + 5*R_HEIGHT + 5);
+        doc.text(flat.prevRead, X2 + 2, Y_START + 5*R_HEIGHT + 5);
+        doc.text("5% SURCHARGE", X3 + 2, Y_START + 5*R_HEIGHT + 5);
+        doc.text(surcharge, X4 + 2, Y_START + 5*R_HEIGHT + 5);
+
+        // Row 7
+        doc.text("DIFFERENCE [M3]", X0 + 2, Y_START + 6*R_HEIGHT + 5);
+        doc.text(flat.consumption, X2 + 2, Y_START + 6*R_HEIGHT + 5);
+        doc.text("[AFTER DUE DATE]", X3 + 2, Y_START + 6*R_HEIGHT + 5);
+
+        // Row 8
+        doc.text("UNIT PRICE [BDT/M3]", X0 + 2, Y_START + 7*R_HEIGHT + 5);
+        doc.text(currentProject.data.rate.toString(), X2 + 2, Y_START + 7*R_HEIGHT + 5);
+        doc.setFont("helvetica", "bold");
+        doc.text("TOTAL BILL", X3 + 2, Y_START + 7*R_HEIGHT + 5);
+        doc.text(totalDue, X4 + 2, Y_START + 7*R_HEIGHT + 5);
+        doc.setFont("helvetica", "normal");
+
+        // Row 9
+        doc.text("DUE DATE", X0 + 2, Y_START + 8*R_HEIGHT + 5);
+        doc.text(dueDateStr, X1 + 2, Y_START + 8*R_HEIGHT + 5);
+        doc.text("[AFTER DUE DATE]", X3 + 2, Y_START + 8*R_HEIGHT + 5);
+
+        // Row 10
+        doc.setFont("helvetica", "bold");
+        doc.text("PLEASE PAY WITHIN DUE DATE FOR UNINTERRUPTED GAS SUPPLY", 105, Y_START + 9*R_HEIGHT + 5, {align: "center"});
+
+        // SIGNATURES
+        doc.setFont("helvetica", "normal");
         doc.text("RECEIVED BY", 15, yOffset + 145);
         doc.line(15, yOffset + 140, 50, yOffset + 140);
 
         doc.text("AUTHORISED SIGNATURE", 150, yOffset + 145);
         doc.line(150, yOffset + 140, 195, yOffset + 140);
-
-        doc.setFont("helvetica", "italic");
-        doc.text("PLEASE PAY WITHIN DUE DATE FOR UNINTERRUPTED GAS SUPPLY", 105, yOffset + 155, { align: "center" });
     }
 
     drawHalf(0, true);
-    doc.line(0, 160, 210, 160); // dashed line separator
-    drawHalf(165, false);
+    doc.line(0, 148, 210, 148); // dashed line separator
+    drawHalf(148, false);
 
     let fileName = `( ${currentProject.pName} - ${billingMonth.replace(' @ ', ' ')} ) - ${flat.flatNo}.pdf`;
     doc.save(fileName);
@@ -316,14 +361,25 @@ function sendSMS(flat) {
     btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>';
     
     let gasBill = (flat.consumption * currentProject.data.rate).toFixed(2);
-    let mf = (gasBill * 0.06).toFixed(2);
+    let mf = (flat.consumption * currentProject.data.rate * 0.06).toFixed(2);
     let due = "0.00"; 
     
     let bMonth = billingMonth.split(' @ ')[0] || "August";
     let bYear = billingMonth.split(' @ ')[1] ? billingMonth.split(' @ ')[1].slice(2) : "26";
     let projCode = currentProject.pName.substring(0,2).toUpperCase() + bYear;
 
-    let smsBody = `Gas Bill : ${bMonth}, ${bYear}. \nID : ${projCode}-${flat.flatNo.padStart(4, '0')}\n\nUsage : ${flat.consumption} CM. \nUnit Price : ${currentProject.data.rate} Taka.\n\nGas : ${gasBill} Taka,\nMF : ${mf} Taka &\nDue : ${due} Taka \nTotal Bill: ${flat.total} Taka. \n\nFor Details : http://urbangaz.net/bill/${flat.flatNo}`;
+    let smsBody = `Gas Bill : ${bMonth}, ${bYear}. 
+ID : ${projCode}-${flat.flatNo.padStart(4, '0')}
+
+Usage : ${flat.consumption} CM. 
+Unit Price : ${currentProject.data.rate} Taka.
+
+Gas : ${gasBill} Taka,
+MF : ${mf} Taka &
+Due : ${due} Taka 
+Total Bill: ${flat.total} Taka. 
+
+For Details : http://urbangaz.net/bill/${flat.flatNo}`;
 
     setTimeout(() => {
         alert("SMS Sent:\n\n" + smsBody);
